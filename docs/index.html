@@ -1002,6 +1002,7 @@
       function createXORTransformStream(key) {
         const encoder = new TextEncoder();
         const keyBytes = encoder.encode(key);
+        let keyPos = 0;
         return new TransformStream({
           transform(chunk, controller) {
             const input = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
