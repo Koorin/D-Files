@@ -1002,15 +1002,22 @@
       function createXORTransformStream(key) {
         const encoder = new TextEncoder();
         const keyBytes = encoder.encode(key);
+        const EXPAND = 1 << 20;
+        const expandedKey = new Uint8Array(EXPAND);
+        for (let i = 0; i < EXPAND; i++) {
+          expandedKey[i] = keyBytes[i % keyBytes.length];
+        }
+        const mask = EXPAND - 1;
         let keyPos = 0;
         return new TransformStream({
           transform(chunk, controller) {
             const input = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
             const output = new Uint8Array(input.length);
+            let start = keyPos & mask;
             for (let i = 0; i < input.length; i++) {
-              output[i] = input[i] ^ keyBytes[keyPos % keyBytes.length];
-              keyPos++;
+              output[i] = input[i] ^ expandedKey[(start + i) & mask];
             }
+            keyPos += input.length;
             controller.enqueue(output);
           }
         });
