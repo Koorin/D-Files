@@ -1004,9 +1004,11 @@
         const keyBytes = encoder.encode(key);
         return new TransformStream({
           transform(chunk, controller) {
-            const output = new Uint8Array(chunk.length);
-            for (let i = 0; i < chunk.length; i++) {
-              output[i] = chunk[i] ^ keyBytes[i % keyBytes.length];
+            const input = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+            const output = new Uint8Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+              output[i] = input[i] ^ keyBytes[keyPos % keyBytes.length];
+              keyPos++;
             }
             controller.enqueue(output);
           }
