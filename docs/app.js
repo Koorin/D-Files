@@ -1481,7 +1481,7 @@
 
       (function () {
         const ANNOTATIONS = [
-          { selector: '.title-section', title: '加密选项', text: '加密使用 AES-256-GCM，密钥由 PBKDF2-SHA256（60 万次）从口令派生。未填写口令时使用内置默认密钥——它公开在源码中，只用于阻止常规工具直接读取文件，不提供保密性。文件名不参与校验，改名不影响解密。', highlightSelector: "#keycfg", highlightDuration: 'persistent'},
+          { selector: '.title-section', title: '处理配置', text: '展开后可设置：密钥留空则使用内置默认密钥；「在此设备记住」在本机保存口令；「内存优化」让大文件直接写入磁盘、降低内存占用；「清空本地密钥记忆」删除已保存的口令。', highlightSelector: "#keycfg", highlightDuration: 'persistent'},
           { selector: '.card', title: '功能区', text: '帮助文本', highlightDuration: 'persistent' },
           { selector: '#modeToggleBtn', title: '外观切换', text: '点击可在正常模式与黑夜模式之间切换。仅正常模式支持外观自定义。', highlightDuration: 'persistent'}
         ];
