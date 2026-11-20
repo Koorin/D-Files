@@ -1,0 +1,5 @@
+# 供审计使用：升级依赖后请重新生成本文件
+# 安装时间：2026-11-20T09:09:23.630Z
+@zip.js/zip.js 2.25.0	dist/zip.min.js	172539 bytes	sha384-Tv/uK4P6eGeoQ4iu0W+HIKp3xLGXTbm3820RHTASei/15eBB5Lk5MLrpMSJb01fE
+@simonwep/pickr 1.10.3	dist/pickr.min.js	23297 bytes	sha384-2iTnpvDO7tVk6m6QH55Zy1mQ2xs71k68woDMAGp4I6LGlGdVQcyjFxCPluESdjAW
+@simonwep/pickr 1.10.3	dist/themes/monolith.min.css	8939 bytes	sha384-pdormgpYmBFP6Ea5e8uB3LTikkIdn4OuJmvv/1yCa8/vep2E0g43A+8vn1c6rj1C
