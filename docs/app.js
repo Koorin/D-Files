@@ -352,50 +352,100 @@
         return header;
       }
 
-      // 逐块加密：任何时刻内存里只保留一块明文与一块密文
+      // 逐块加密：流式读取并攒够 chunkSize 再加密。
+      // 早期实现用 blob.slice(i*chunk, ...) 逐块读，1.56 GB 实测读文件要 2.8 s，
+      // 而 file.stream() 只要 1.2 s —— 所以这里改回流式。
       async function* encryptedRecords(blob, key, ivBase, aad, chunkSize) {
-        const count = recordCount(blob.size, chunkSize);
-        for (let i = 0; i < count; i++) {
-          const plain = new Uint8Array(await blob.slice(i * chunkSize, (i + 1) * chunkSize).arrayBuffer());
+        const reader = blob.stream().getReader();
+        const buf = new Uint8Array(chunkSize);
+        let filled = 0;
+        let index = 0;
+        const makeRecord = async (plainLen) => {
+          const plain = buf.subarray(0, plainLen);
           const cipher = new Uint8Array(await crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: chunkIv(ivBase, i), additionalData: aad, tagLength: 128 }, key, plain));
+            { name: "AES-GCM", iv: chunkIv(ivBase, index), additionalData: aad, tagLength: 128 }, key, plain));
           const record = new Uint8Array(4 + cipher.length);
-          new DataView(record.buffer).setUint32(0, plain.length, false);
+          new DataView(record.buffer).setUint32(0, plainLen, false);
           record.set(cipher, 4);
-          yield record;
+          index++;
+          return record;
+        };
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (value && value.length) {
+              let offset = 0;
+              while (offset < value.length) {
+                const take = Math.min(chunkSize - filled, value.length - offset);
+                buf.set(value.subarray(offset, offset + take), filled);
+                filled += take;
+                offset += take;
+                if (filled === chunkSize) {
+                  yield await makeRecord(filled);
+                  filled = 0;
+                }
+              }
+            }
+            if (done) break;
+          }
+          // 空文件也要写一条记录，让头部得到认证
+          if (filled > 0 || index === 0) yield await makeRecord(filled);
+        } finally {
+          try { reader.releaseLock(); } catch (e) {}
         }
       }
 
-      // 逐块解密；长度与记录数全部由已认证的头部推导，截断/换序都会失败。
-      // firstPlain 是"试密钥"时已经解出的第一块，避免重复工作。
+      // 逐块解密：同样走流式读取，按"4 字节长度 + 密文 + 16 字节 tag"切分。
       async function* decryptedRecords(file, v2, key, firstPlain = null) {
         const count = recordCount(v2.payloadLen, v2.chunkSize);
-        let offset = v2.contentStart;
-        let total = 0;
         let index = 0;
+        let total = 0;
         if (firstPlain) {
           total += firstPlain.length;
-          offset += 4 + firstPlain.length + GCM_TAG_LEN;
           index = 1;
           yield firstPlain;
         }
-        for (; index < count; index++) {
-          const plainLen = index === count - 1 ? v2.payloadLen - index * v2.chunkSize : v2.chunkSize;
-          const recordLen = 4 + plainLen + GCM_TAG_LEN;
-          if (offset + recordLen > file.size) throw new Error("文件不完整，可能被截断");
-          const record = new Uint8Array(await file.slice(offset, offset + recordLen).arrayBuffer());
-          if (new DataView(record.buffer, 0, 4).getUint32(0, false) !== plainLen) throw new Error("文件已损坏");
-          let plain;
+        if (index < count) {
+          // 试密钥时已经解出第 0 块，流式读取要从它之后开始
+          const skipBytes = firstPlain ? 4 + firstPlain.length + GCM_TAG_LEN : 0;
+          const reader = file.slice(v2.contentStart + skipBytes).stream().getReader();
+          let carry = new Uint8Array(0);
+          const take = async (n) => {
+            while (carry.length < n) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const merged = new Uint8Array(carry.length + value.length);
+              merged.set(carry);
+              merged.set(value, carry.length);
+              carry = merged;
+            }
+            if (carry.length < n) throw new Error("文件不完整，可能被截断");
+            const out = carry.subarray(0, n);
+            carry = carry.subarray(n);
+            return out;
+          };
           try {
-            plain = new Uint8Array(await crypto.subtle.decrypt(
-              { name: "AES-GCM", iv: chunkIv(v2.ivBase, index), additionalData: v2.aad, tagLength: 128 },
-              key, record.subarray(4)));
-          } catch (e) {
-            throw new Error("密钥不正确，或文件已被篡改");
+            for (; index < count; index++) {
+              const plainLen = index === count - 1 ? v2.payloadLen - index * v2.chunkSize : v2.chunkSize;
+              const head = await take(4);
+              if (new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false) !== plainLen) {
+                throw new Error("文件已损坏");
+              }
+              const body = await take(plainLen + GCM_TAG_LEN);
+              let plain;
+              try {
+                plain = new Uint8Array(await crypto.subtle.decrypt(
+                  { name: "AES-GCM", iv: chunkIv(v2.ivBase, index), additionalData: v2.aad, tagLength: 128 },
+                  key, body));
+              } catch (e) {
+                throw new Error("密钥不正确，或文件已被篡改");
+              }
+              total += plain.length;
+              yield plain;
+            }
+          } finally {
+            try { reader.releaseLock(); } catch (e) {}
           }
-          total += plain.length;
-          offset += recordLen;
-          yield plain;
         }
         if (total !== v2.payloadLen) throw new Error("文件已损坏");
       }
@@ -422,13 +472,37 @@
         return typeof window !== "undefined" && typeof window.showSaveFilePicker === "function";
       }
 
+      // “大文件直接写盘”默认关闭：保持项目原有的“生成后给下载链接”行为。
+      // 只有用户显式勾选时，超过阈值的文件才会弹保存框并流式写入。
+      const DIRECT_SAVE_PREF = "df.directSave";
+
+      function directSaveEnabled() {
+        try { return localStorage.getItem(DIRECT_SAVE_PREF) === "true"; } catch (e) { return false; }
+      }
+
+      function setDirectSave(on) {
+        try { localStorage.setItem(DIRECT_SAVE_PREF, on ? "true" : "false"); } catch (e) {}
+      }
+
+      function wantDirectSave(bytes) {
+        return directSaveEnabled() && fileSystemSinkAvailable() && bytes > STREAM_THRESHOLD;
+      }
+
       async function openFileSink(suggestedName) {
         const handle = await window.showSaveFilePicker({ suggestedName });
         return handle.createWritable();
       }
 
       function inMemoryTooLarge(bytes) {
-        return !fileSystemSinkAvailable() && bytes > IN_MEMORY_WARN_BYTES;
+        return !directSaveEnabled() && bytes > IN_MEMORY_WARN_BYTES;
+      }
+
+      function memoryHint(bytes) {
+        const gb = (bytes / 1024 ** 3).toFixed(2);
+        if (fileSystemSinkAvailable()) {
+          return `提示：文件较大（${gb} GiB），会在内存中组装约 2 倍体积的数据。可勾选「大文件直接写盘」边生成边写入磁盘。`;
+        }
+        return `提示：文件较大（${gb} GiB），当前浏览器不支持直接写盘，可能因内存不足而失败。`;
       }
 
       async function createZipBlob(files) {
@@ -778,7 +852,7 @@
           // 体积较大时优先流式写盘：必须在用户手势有效期内先要句柄
           const estimatedPayload = hiddenFiles.reduce((n, f) => n + f.size, 0) + hiddenFiles.length * 1024;
           const estimatedTotal = cover.size + estimatedPayload;
-          if (fileSystemSinkAvailable() && estimatedTotal > STREAM_THRESHOLD) {
+          if (wantDirectSave(estimatedTotal)) {
             try {
               writable = await openFileSink(disguisedFileName);
             } catch (e) {
@@ -791,7 +865,7 @@
           }
           if (!writable && inMemoryTooLarge(estimatedTotal)) {
             const warn = document.createElement("div");
-            warn.textContent = "提示：文件较大，当前浏览器不支持直接写盘，可能因内存不足而失败。";
+            warn.textContent = memoryHint(estimatedTotal);
             warn.style.color = "#f59e0b";
             warn.style.fontSize = "0.95rem";
             result.appendChild(warn);
@@ -976,7 +1050,7 @@
               }
             }
 
-            if (fileSystemSinkAvailable() && v2.payloadLen > STREAM_THRESHOLD) {
+            if (wantDirectSave(v2.payloadLen)) {
               try {
                 writable = await openFileSink(originalName);
               } catch (e) {
@@ -1009,7 +1083,7 @@
 
             if (inMemoryTooLarge(v2.payloadLen)) {
               const warn = document.createElement("div");
-              warn.textContent = "提示：文件较大，当前浏览器不支持直接写盘，可能因内存不足而失败。";
+              warn.textContent = memoryHint(v2.payloadLen);
               warn.style.color = "#f59e0b";
               warn.style.fontSize = "0.95rem";
               box.appendChild(warn);
@@ -1753,6 +1827,7 @@
         }
 
         const rememberCheckbox = document.getElementById("rememberKey");
+        const directSaveCheckbox = document.getElementById("directSave");
         const clearBtn = document.getElementById("clearKeyBtn");
         const keyPanel = document.getElementById("keyPanel");
         const button = document.getElementById("keycfg");
@@ -1776,6 +1851,12 @@
               // 关掉开关时把已保存的设备端密钥一并清掉
               try { localStorage.removeItem(KEY_DEVICE_STORE); } catch (e) {}
             }
+          });
+        }
+        if (directSaveCheckbox) {
+          directSaveCheckbox.checked = directSaveEnabled();
+          directSaveCheckbox.addEventListener("change", () => {
+            setDirectSave(directSaveCheckbox.checked);
           });
         }
         // 旧版本遗留的键，清理掉避免残留在存储里
