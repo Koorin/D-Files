@@ -61,13 +61,13 @@
       <h1>🤔 文件易容 ☝🏻🤓</h1>
       <p>╮（￣▽￣）╭ 可将任意文件变成其他文件，也可提取被隐藏的原文件。</p>
         <div class="keysets">
-          <button id="keycfg" class="uniButton">加密处理配置</button>
+          <button id="keycfg" class="uniButton">处理配置</button>
             <div id="keyPanel" class="hidden">
-              <input type="text" id="keyInput" class="ekinput" placeholder="密钥（留空用内置默认密钥）">
+              <input type="text" id="keyInput" class="ekinput" placeholder="密钥（留空用默认密钥）">
               <label class="fakebtn"><input type="checkbox" id="rememberKey" class="nobtn"><span class="btnlabel">在此设备记住</span></label>
+              <label class="fakebtn" title="开启后大文件会直接写入磁盘（弹出保存对话框，更省内存）；关闭则和以前一样生成下载链接"><input type="checkbox" id="directSave" class="nobtn"><span class="btnlabel">内存优化</span></label>
             </div>
           <button id="clearKeyBtn" class="uniButton">清空本地密钥记忆</button>
-          <label class="fakebtn" title="勾选后大文件会直接写入磁盘（弹出保存对话框，更省内存）；不勾选则和以前一样生成下载链接"><input type="checkbox" id="directSave" class="nobtn"><span class="btnlabel">大文件直接写盘</span></label>
           <span id="clearKeyStatus" class="status-indicator"></span>
         </div>
     </div>

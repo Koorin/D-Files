@@ -166,7 +166,7 @@
         clearBtn.classList.toggle("hidden");
         keyPanel.classList.toggle("hidden");
         const isNowVisible = !clearBtn.classList.contains("hidden");
-        toggleBtn.textContent = isNowVisible ? "隐藏加密配置" : "加密处理配置";
+        toggleBtn.textContent = isNowVisible ? "隐藏配置" : "处理配置";
         localStorage.setItem("keyPanelOpen", isNowVisible ? "true" : "false");
       }
 
@@ -472,7 +472,7 @@
         return typeof window !== "undefined" && typeof window.showSaveFilePicker === "function";
       }
 
-      // “大文件直接写盘”默认关闭：保持项目原有的“生成后给下载链接”行为。
+      // “内存优化”默认关闭：保持项目原有的“生成后给下载链接”行为。
       // 只有用户显式勾选时，超过阈值的文件才会弹保存框并流式写入。
       const DIRECT_SAVE_PREF = "df.directSave";
 
@@ -500,7 +500,7 @@
       function memoryHint(bytes) {
         const gb = (bytes / 1024 ** 3).toFixed(2);
         if (fileSystemSinkAvailable()) {
-          return `提示：文件较大（${gb} GiB），会在内存中组装约 2 倍体积的数据。可勾选「大文件直接写盘」边生成边写入磁盘。`;
+          return `提示：文件较大（${gb} GiB），会在内存中组装约 2 倍体积的数据。可在「处理配置」里勾选「内存优化」，边生成边写入磁盘。`;
         }
         return `提示：文件较大（${gb} GiB），当前浏览器不支持直接写盘，可能因内存不足而失败。`;
       }
@@ -1840,7 +1840,7 @@
           keyPanel.classList.add("hidden");
         }
         const isHidden = keyPanel.classList.contains("hidden");
-        button.textContent = isHidden ? "加密处理配置" : "隐藏加密配置";
+        button.textContent = isHidden ? "处理配置" : "隐藏配置";
         // 部署后新旧文件可能短暂混用（GitHub Pages 缓存约 10 分钟）：
         // 找不到元素时降级，而不是让整个初始化抛错
         if (rememberCheckbox) {
